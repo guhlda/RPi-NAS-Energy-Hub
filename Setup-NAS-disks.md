@@ -125,7 +125,7 @@ The monthly scrub reads every block, checks its checksum and repairs corrupted b
 
 ### Create the family user
 
-The `family` Linux account and group will own the `photos` and `videos` subvolumes. Create it with limited rights: no home folder, no shell login and no `sudo`, so it cannot log in to the Raspberry Pi. `useradd` also creates a `family` group with the same name:
+The `family` Linux account and group will own the `photos` and `videos` subvolumes (see [Setup file shares](./Setup-file-shares.md), section 3). Create it with limited rights: no home folder, no shell login and no `sudo`, so it can only be used through Samba. `useradd` also creates a `family` group with the same name:
 
 ```
 sudo useradd -M -s /usr/sbin/nologin family
@@ -143,7 +143,7 @@ Replace `pi` with the user name you chose in `userconf.txt`. Log out and back in
 
 Two kinds of folders exist on the volume:
 
-- **Subvolumes** (`photos`, `documents`, `videos`): the top-level folders. Each one is snapshotted on its own. Create one for each new kind of content you want to manage or snapshot separately.
+- **Subvolumes** (`photos`, `documents`, `videos`): the top-level folders. Each one is snapshotted on its own and matches a Samba share. Create one for each new kind of content you want to share or snapshot separately.
 - **Ordinary directories**, inside a subvolume: to organize the content (`photos/2026`, `videos/holidays`, ...). They are included in the snapshots of their subvolume.
 
 A directory cannot be turned into a subvolume later. To do it, create the subvolume and copy the content into it (see the end of this section).
@@ -154,7 +154,7 @@ A directory cannot be turned into a subvolume later. To do it, create the subvol
 mkdir -m 2775 /mnt/nas/photos/2026
 ```
 
-`-m 2775` keeps the folder writable by the `family` group and the setgid bit (new files inherit the `family` group). A plain `mkdir` would create it with mode `2755` (because of the default `umask 022`), and the other members of the `family` group could not write to it.
+`-m 2775` keeps the folder writable by the `family` group and the setgid bit (new files inherit the `family` group). A plain `mkdir` would create it with mode `2755` (because of the default `umask 022`), and `family` could not write to it through Samba. Folders created through Samba by `family` get the right mode automatically.
 
 In `documents` (owned by `pi`), a plain `mkdir /mnt/nas/documents/<name>` is enough.
 
@@ -166,7 +166,7 @@ sudo chown family:family /mnt/nas/music
 sudo chmod 2775 /mnt/nas/music
 ```
 
-Then add it to the automatic snapshots (`subvolume music` in `btrbk.conf`, below).
+Then add it to the automatic snapshots (`subvolume music` in `btrbk.conf`, below) and, if needed, create a Samba share for it, like `[photos]` in [Setup file shares](./Setup-file-shares.md).
 
 **List the subvolumes**:
 
@@ -197,7 +197,7 @@ sudo btrfs subvolume delete /mnt/nas/music
 
 A snapshot is a read-only, frozen copy of a subvolume at a given time. It is created instantly and only uses space for the data changed or deleted since. Snapshots protect against accidental deletion or modification, but they are on the same disks: they are **not a backup**.
 
-The snapshots are stored in `/mnt/nas/.snapshots` and named `<subvolume>-<date>`. If you use `btrbk` (below), it uses its own naming.
+The snapshots are stored in `/mnt/nas/.snapshots` and named `<subvolume>-<date>`, the naming expected by the Samba "Previous Versions" settings ([Setup file shares](./Setup-file-shares.md), section 6). If you use `btrbk` (below), use its naming instead and adapt `shadow:format`.
 
 **Create a snapshot** of one subvolume:
 
@@ -227,6 +227,8 @@ sudo btrfs subvolume list -s /mnt/nas
 ```
 cp -a --reflink=always /mnt/nas/.snapshots/photos-2026-10-06/2026/IMG_0001.jpg /mnt/nas/photos/2026/
 ```
+
+From Windows, the Samba "Previous Versions" tab does the same.
 
 **Restore a whole subvolume**: rename the current one, then create a writable snapshot from the saved one in its place:
 
@@ -267,7 +269,7 @@ volume /mnt/nas
   subvolume videos
 ```
 
-- `timestamp_format long`: snapshots are named `photos.20261006T0300`.
+- `timestamp_format long`: snapshots are named `photos.20261006T0300`. In the Samba settings, use `shadow:format = photos.%Y%m%dT%H%M` (and the same for the other shares).
 - `snapshot_preserve_min 2d`: all snapshots of the last 2 days are kept.
 - `snapshot_preserve 14d 8w 12m`: then one snapshot per day for 14 days, one per week for 8 weeks, and one per month for 12 months. Older snapshots are deleted.
 
@@ -288,7 +290,7 @@ systemctl list-timers btrbk.timer
 
 If the timer does not exist, add a daily cron job instead: create `/etc/cron.daily/btrbk` containing `#!/bin/sh` and `exec /usr/bin/btrbk -q run`, then `sudo chmod +x /etc/cron.daily/btrbk`.
 
-Use **either** the manual naming **or** btrbk's, not both: tools that read the snapshots expect a single naming pattern. To take an extra snapshot by hand with btrbk (before a large reorganization, for example), run `sudo btrbk run`.
+Use **either** the manual naming **or** btrbk's: Samba "Previous Versions" only shows the snapshots that match its `shadow:format`. To take an extra snapshot by hand with btrbk (before a large reorganization, for example), run `sudo btrbk run`.
 
 `btrbk` can also send the snapshots to an external disk for backups (`target` option, see its documentation).
 
